@@ -1,3 +1,5 @@
+###早期demo
+
 # 3D AI 桌宠
 
 桌面悬浮的 AI 桌宠:Python 后端(LLM + Agent + TTS + 记忆)+ Web 前端(角色渲染 + 控制台),2D(Live2D)→ 3D(MMD)迭代,最终用 Electron 做透明无边框悬浮窗。
@@ -15,7 +17,7 @@
 - [ ] 阶段 7 — 3D MMD 迭代
 
 ## 运行
-
+需要openai compatitable api（需要支持流式传输） 以及阿里cosyvoice系列asr和tts模型token(需要在百炼上申请）
 ### 后端
 ```bash
 cd backend
