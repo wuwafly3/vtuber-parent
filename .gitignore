@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# Env & secrets
+.env
+*.local
+
+# 模型与声音样本 (版权/隐私,不入库)
+assets/models/*
+assets/voices/*
+!assets/models/.gitkeep
+!assets/voices/.gitkeep
+
+# Live2D 模型文件 (太大,不入库)
+live2d_by_booru/
+live2d_by_booru*.zip
+frontend/public/models/
+frontend/public/lib/
+
+# 工具配置
+.claude/
+
+# TypeScript 编译缓存
+*.tsbuildinfo
+
+# 数据库
+*.db
+*.sqlite3

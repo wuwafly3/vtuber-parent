@@ -1,0 +1,29 @@
+[project]
+name = "desktop-pet-backend"
+version = "0.1.0"
+description = "3D AI 桌宠后端: LLM + Agent + TTS + Memory"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "websockets>=13",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "openai>=1.54",
+    "dashscope>=1.20",
+    "mss>=9.0",
+    "pyautogui>=0.9.54",
+    "python-multipart>=0.0.12",
+    "aiosqlite>=0.20",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
