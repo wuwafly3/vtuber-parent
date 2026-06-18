@@ -1,0 +1,47 @@
+{
+  "productName": "Desktop Pet",
+  "version": "0.1.0",
+  "identifier": "com.desktoppet.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "pet",
+        "title": "Desktop Pet",
+        "url": "index.html?mode=pet",
+        "width": 380,
+        "height": 480,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
+      },
+      {
+        "label": "console",
+        "title": "Desktop Pet Console",
+        "url": "index.html?mode=console",
+        "width": 850,
+        "height": 700,
+        "resizable": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
+  }
+}

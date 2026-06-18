@@ -13,7 +13,7 @@ export type ServerEvent =
   | { type: "pong" };
 
 export type ClientEvent =
-  | { type: "user_message"; text: string; session_id?: string }
+  | { type: "user_message"; text: string; image?: string; session_id?: string }
   | { type: "confirm_action"; action_id: string; approved: boolean }
   | { type: "ping" };
 
@@ -25,7 +25,7 @@ export class PetSocket {
   private url: string;
   private reconnectTimer: number | null = null;
 
-  constructor(url = `ws://${location.hostname}:8000/ws`) {
+  constructor(url = `ws://127.0.0.1:8000/ws`) {
     this.url = url;
   }
 

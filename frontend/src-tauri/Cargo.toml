@@ -1,0 +1,12 @@
+[package]
+name = "desktop-pet"
+version = "0.1.0"
+edition = "2021"
+description = "3D AI Desktop Pet"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

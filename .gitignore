@@ -31,6 +31,10 @@ frontend/public/lib/
 # TypeScript 编译缓存
 *.tsbuildinfo
 
+# Tauri
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+
 # 数据库
 *.db
 *.sqlite3

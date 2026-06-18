@@ -16,12 +16,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.agent import registry
+from app.agent.loop import run_agent_loop, AgentResult
 from app.llm.service import ChunkType, LLMService
 from app.llm.session import SessionManager
 from app.llm.streaming import EmotionParser, SentenceSplitter
 from app.memory import MemoryManager
 from app.tts.dashscope_tts import DashScopeTTS
 from app.ws.protocol import (
+    AgentStatusEvent,
     AudioChunkEvent,
     AudioDoneEvent,
     ClientEventType,
@@ -125,19 +128,31 @@ async def _process_memory(session_id: str, user_text: str, assistant_text: str) 
     )
 
 
-async def handle_user_message(ws: WebSocket, session_id: str, text: str) -> None:
+async def handle_user_message(ws: WebSocket, session_id: str, text: str, image: str | None = None) -> None:
     """调 LLM 流式回复,推 token / expression / 逐句音频,结束推 message_done。
 
-    句子切分出的整句串行送 TTS,保证音频顺序;TTS 在独立队列消费,不阻塞 token 流。
+    集成 agent loop: 如果 LLM 决定调用工具, agent loop 内部执行并循环,
+    最终返回纯文本回复, 由本函数做流式推送 + TTS。
     """
     # 注入记忆上下文（仅 DB 读，亚毫秒）
     if memory_manager is not None:
         memory_text = await memory_manager.get_context_memories(session_id)
         sessions.set_memory_context(session_id, memory_text)
 
-    sessions.add_user(session_id, text)
+    sessions.add_user(session_id, text, image=image)
     messages = sessions.get_messages(session_id)
 
+    # ── Agent loop: 可能触发工具调用, 返回最终文本 ──
+    agent_result = await run_agent_loop(llm, registry, messages, ws)
+    final_text = agent_result.text
+
+    # 如果有工具调用，保存 tool messages 到 session 历史
+    if agent_result.images:
+        # 从 messages 中提取 agent loop 追加的 tool 交互消息
+        # (跳过 system 和原始 user message, 取 agent loop 新增的部分)
+        _save_tool_interactions(session_id, messages)
+
+    # ── 流式推送最终回复 ──
     emotion_parser = EmotionParser()
     splitter = SentenceSplitter()
     full_reply = ""
@@ -158,36 +173,36 @@ async def handle_user_message(ws: WebSocket, session_id: str, text: str) -> None
         if tts_task:
             tts_queue.put_nowait(sentence)
 
-    try:
-        async for chunk in llm.stream_chat(messages):
-            if chunk.type is ChunkType.TEXT:
-                emotion, clean = emotion_parser.feed(chunk.text)
-                if emotion:
-                    await send_event(ws, ExpressionEvent(name=emotion))
-                if clean:
-                    full_reply += clean
-                    await send_event(ws, TokenEvent(text=clean))
-                    for sentence in splitter.feed(clean):
-                        enqueue(sentence)
-            elif chunk.type is ChunkType.FINISH:
-                break
-
-        # 收尾:emotion_parser 残留 + 最后未切出的尾句
-        tail = emotion_parser.flush()
-        if tail:
-            full_reply += tail
-            await send_event(ws, TokenEvent(text=tail))
-            for sentence in splitter.feed(tail):
+    # 逐字符模拟流式推送(因为 agent loop 已经拿到了完整文本)
+    # 为了让 emotion_parser 和 splitter 正常工作, 按块推送
+    chunk_size = 20
+    for i in range(0, len(final_text), chunk_size):
+        chunk_text = final_text[i:i + chunk_size]
+        emotion, clean = emotion_parser.feed(chunk_text)
+        if emotion:
+            await send_event(ws, ExpressionEvent(name=emotion))
+        if clean:
+            full_reply += clean
+            await send_event(ws, TokenEvent(text=clean))
+            for sentence in splitter.feed(clean):
                 enqueue(sentence)
-        last = splitter.flush()
-        if last:
-            enqueue(last)
-    finally:
-        # 等音频队列排空再收尾
-        if tts_task:
-            tts_queue.put_nowait(None)
-            await tts_task
-            await send_event(ws, AudioDoneEvent())
+
+    # 收尾:emotion_parser 残留 + 最后未切出的尾句
+    tail = emotion_parser.flush()
+    if tail:
+        full_reply += tail
+        await send_event(ws, TokenEvent(text=tail))
+        for sentence in splitter.feed(tail):
+            enqueue(sentence)
+    last = splitter.flush()
+    if last:
+        enqueue(last)
+
+    # 等音频队列排空再收尾
+    if tts_task:
+        tts_queue.put_nowait(None)
+        await tts_task
+        await send_event(ws, AudioDoneEvent())
 
     sessions.add_assistant(session_id, full_reply)
 
@@ -195,6 +210,39 @@ async def handle_user_message(ws: WebSocket, session_id: str, text: str) -> None
     asyncio.create_task(_process_memory(session_id, text, full_reply))
 
     await send_event(ws, MessageDoneEvent(text=full_reply))
+
+
+def _save_tool_interactions(session_id: str, messages: list[dict]) -> None:
+    """从 agent loop 修改后的 messages 列表中提取 tool 交互, 保存到 session 历史。"""
+    # agent loop 会往 messages 列表追加 assistant(tool_calls) 和 tool(tool_result) 消息
+    # 以及可能的带图片 user 消息。我们需要找到这些新增的消息。
+    # 策略: 从 messages 末尾往前找, 收集所有 role=tool 和带 tool_calls 的 assistant 消息
+    tool_results = []
+    tool_calls_to_save = []
+    assistant_content = None
+
+    for msg in reversed(messages):
+        if msg["role"] == "tool":
+            tool_results.insert(0, {
+                "id": msg["tool_call_id"],
+                "name": "",  # name 在 tool role 里不一定有
+                "content": msg["content"],
+            })
+        elif msg["role"] == "assistant" and "tool_calls" in msg:
+            assistant_content = msg.get("content")
+            tool_calls_to_save = msg["tool_calls"]
+            break
+        elif msg["role"] == "user" and isinstance(msg.get("content"), list):
+            # agent loop 追加的带图片 user message, 不保存到长期历史
+            continue
+
+    if tool_calls_to_save:
+        sessions.add_tool_messages(
+            session_id,
+            assistant_content=assistant_content,
+            tool_calls=tool_calls_to_save,
+            tool_results=tool_results,
+        )
 
 
 async def handle_client_event(ws: WebSocket, raw: str) -> None:
@@ -213,8 +261,9 @@ async def handle_client_event(ws: WebSocket, raw: str) -> None:
     if event_type == ClientEventType.USER_MESSAGE.value:
         text = data.get("text", "")
         session_id = data.get("session_id", "default")
+        image = data.get("image")  # optional base64 data URL
         try:
-            await handle_user_message(ws, session_id, text)
+            await handle_user_message(ws, session_id, text, image=image)
         except Exception as exc:  # noqa: BLE001 — 把后端异常透传给前端展示
             logger.exception("llm error")
             await send_event(ws, ErrorEvent(message=f"LLM 调用失败: {exc}"))

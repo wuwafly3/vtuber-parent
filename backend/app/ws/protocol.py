@@ -23,6 +23,7 @@ class UserMessage(BaseModel):
     type: Literal[ClientEventType.USER_MESSAGE] = ClientEventType.USER_MESSAGE
     text: str
     session_id: str = "default"
+    image: str | None = None  # base64 data URL, e.g. "data:image/png;base64,..."
 
 
 class ConfirmAction(BaseModel):

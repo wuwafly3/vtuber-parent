@@ -48,7 +48,16 @@ export class Live2DController {
       resizeTo: container,
       backgroundAlpha: 0, // 透明背景,为阶段 6 桌面悬浮窗铺路
       antialias: true,
+      preserveDrawingBuffer: true, // readPixels 需要保留 backbuffer 内容
       sharedTicker: false,
+      // 禁用 PixiJS 事件系统: Live2D 内部节点缺少 isInteractive,
+      // 会导致 EventBoundary 报错。桌宠拖拽由 Tauri 层处理。
+      eventFeatures: {
+        click: false,
+        move: false,
+        wheel: false,
+        globalMove: false,
+      },
     });
   }
 
@@ -132,6 +141,42 @@ export class Live2DController {
   };
 
   private blinkPhase = 0;
+
+  /**
+   * 检测指定屏幕坐标处的像素透明度。
+   * 返回 0~255, 0 = 完全透明 (角色外), 255 = 完全不透明 (角色上)。
+   * 用于鼠标穿透: 透明区域穿透, 不透明区域接收点击。
+   */
+  getPixelAlpha(screenX: number, screenY: number): number {
+    if (!this.model) return 0;
+
+    const rect = this.canvas.getBoundingClientRect();
+    const x = screenX - rect.left;
+    const y = screenY - rect.top;
+
+    // 超出 canvas 范围 = 透明
+    if (x < 0 || y < 0 || x >= rect.width || y >= rect.height) return 0;
+
+    // 从 WebGL canvas 读取像素 (需要 devicePixelRatio 校正)
+    const dpr = window.devicePixelRatio || 1;
+    const px = Math.floor(x * dpr);
+    const py = Math.floor(y * dpr);
+
+    const renderer = this.app.renderer;
+    if (renderer.width <= px || renderer.height <= py) return 0;
+
+    const gl = (renderer as any).gl as WebGLRenderingContext | undefined;
+    if (!gl) return 0;
+    const pixel = new Uint8Array(4);
+    // WebGL 坐标系 Y 轴翻转
+    gl.readPixels(px, renderer.height - py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    return pixel[3]; // alpha channel
+  }
+
+  /** 获取 canvas DOM 元素, 供外部添加事件监听。 */
+  getCanvas(): HTMLCanvasElement {
+    return this.canvas;
+  }
 
   destroy(): void {
     this.destroyed = true;
